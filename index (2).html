@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คำนวณค่ารถไฟฟ้า BTS / MRT</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #fff; --text: #1d2733; --muted: #66758a;
+    --line: #dde3ea; --bts: #2e9d4f; --mrt: #1f5fbf; --warn-bg: #fff6df; --warn: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11161c; --card: #1a222b; --text: #e8edf3; --muted: #93a1b3;
+      --line: #2c3947; --bts: #4cc274; --mrt: #6ea2f2; --warn-bg: #2d2610; --warn: #f0c35a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans Thai", "Sarabun", system-ui, sans-serif; line-height: 1.5; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 8px 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin-bottom: 12px; }
+  .leg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .leg-title { font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 3px; }
+  select, input[type=number] { width: 100%; padding: 9px 10px; font: inherit; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: var(--text); padding: 7px 12px;
+    font: inherit; cursor: pointer; }
+  .seg button[aria-pressed=true] { color: #fff; }
+  .seg button[data-sys=bts][aria-pressed=true] { background: var(--bts); }
+  .seg button[data-sys=mrt][aria-pressed=true] { background: var(--mrt); }
+  .leg-result { margin-top: 10px; font-size: .95rem; color: var(--muted); }
+  .leg-result b { color: var(--text); font-size: 1.1rem; }
+  .remove { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; }
+  .add { width: 100%; padding: 10px; border: 1px dashed var(--line); border-radius: 10px;
+    background: transparent; color: var(--text); font: inherit; cursor: pointer; margin-bottom: 12px; }
+  .total { text-align: center; }
+  .total .big { font-size: 2.2rem; font-weight: 700; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; text-align: left; }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 10px;
+    padding: 10px 12px; font-size: .9rem; margin-bottom: 12px; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 20px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>คำนวณค่ารถไฟฟ้า BTS / MRT</h1>
+  <p class="sub">เลือกสถานีต้นทางและปลายทาง เพิ่มได้หลายช่วงหากต้องต่อรถไฟฟ้าข้ามระบบ</p>
+
+  <div class="card">
+    <label for="rider">ประเภทผู้โดยสาร</label>
+    <select id="rider">
+      <option value="adult">บุคคลทั่วไป</option>
+      <option value="elderly">ผู้สูงอายุ 60 ปีขึ้นไป (ลด 50%)</option>
+      <option value="free">เด็กสูงไม่เกิน 120 ซม. / คนพิการ (MRT สายสีน้ำเงิน ฟรี)</option>
+    </select>
+  </div>
+
+  <div id="bts-warning" class="note" hidden>
+    ราคา BTS รายจำนวนสถานียังไม่ได้ตรวจกับตารางทางการ (ช่วงราคา 17-47 บาท ตรงกับประกาศ)
+    โปรดเทียบกับป้ายราคาที่สถานี
+  </div>
+
+  <div id="legs"></div>
+  <button class="add" id="add-leg" type="button">+ เพิ่มช่วงการเดินทาง</button>
+
+  <div class="card total">
+    <div>ค่าโดยสารรวมต่อเที่ยว</div>
+    <div class="big" id="total">0 บาท</div>
+    <div class="rows">
+      <div>
+        <label for="trips">เที่ยวต่อวัน</label>
+        <input id="trips" type="number" min="1" max="20" value="2">
+      </div>
+      <div>
+        <label for="days">วันเดินทางต่อเดือน</label>
+        <input id="days" type="number" min="1" max="31" value="22">
+      </div>
+    </div>
+    <p id="monthly" style="margin:12px 0 0">ประมาณต่อเดือน: 0 บาท</p>
+  </div>
+
+  <p class="note">
+    ข้อมูลอ้างอิง: MRT สายสีน้ำเงิน 17-44 บาท (มีผล 3 ก.ค. 2569) · BTS สายหลัก 17-47 บาท
+    ยังไม่รวมส่วนต่อขยาย สายสีม่วง สายอื่น ๆ และส่วนลดหรือโปรโมชันพิเศษ
+    BTS กับ MRT ยังเป็นคนละตั๋ว จึงคิดค่าแรกเข้าแยกกัน
+  </p>
+  <footer>ราคาอาจเปลี่ยนแปลงได้ โปรดตรวจสอบกับผู้ให้บริการก่อนเดินทาง</footer>
+</main>
+
+<script>
+/*
+ * ข้อมูลและตรรกะคำนวณค่าโดยสาร BTS สายหลัก และ MRT สายสีน้ำเงิน
+ * ต้องการแก้ราคา ให้แก้ที่ BTS_FARES และ MRT_BLUE_FARES ด้านล่างเท่านั้น
+ *
+ * MRT สายสีน้ำเงิน: ตามข้อบังคับ รฟม. มีผล 3 ก.ค. 2569 (17-44 บาท) ตรวจกับข่าวราชกิจจานุเบกษาแล้ว
+ * BTS สายหลัก: ช่วงราคา 17-47 บาท ยืนยันจากข่าว BTS แต่ราคารายจำนวนสถานี
+ *   ยังไม่ได้ตรวจกับตารางทางการ (BTS_FARES_VERIFIED = false) ให้เทียบกับป้ายราคาที่สถานีก่อนใช้จริง
+ */
+(function (root) {
+  // ราคาตามจำนวนสถานีที่เดินทาง: index 0 = 1 สถานี ตัวสุดท้ายคือราคาของ "จำนวนนั้นขึ้นไป"
+  const BTS_FARES = [17, 25, 28, 32, 35, 39, 42, 47];
+  const BTS_FARES_VERIFIED = false;
+  const MRT_BLUE_FARES = [17, 20, 22, 25, 27, 29, 32, 34, 37, 39, 42, 44];
+
+  // [รหัส, ชื่อไทย, ชื่ออังกฤษ, เป็นสถานีที่ยังไม่สร้างหรือไม่]
+  // BTS นับ "เสนาร่วม" (N6) และ "ศึกษาวิทยา" เป็น 1 สถานีในการคิดค่าโดยสารมาตั้งแต่เปิดบริการ
+  // ศึกษาวิทยา (S4) เปิดแล้ว ส่วนเสนาร่วมยังไม่สร้าง จึงต้องนับเป็นสถานีสมมติ
+  const SUKHUMVIT = [
+    ['N8', 'หมอชิต', 'Mo Chit'],
+    ['N7', 'สะพานควาย', 'Saphan Khwai'],
+    ['N6', 'เสนาร่วม (สถานีที่ยังไม่สร้าง)', 'Sena Ruam', true],
+    ['N5', 'อารีย์', 'Ari'],
+    ['N4', 'สนามเป้า', 'Sanam Pao'],
+    ['N3', 'อนุสาวรีย์ชัยสมรภูมิ', 'Victory Monument'],
+    ['N2', 'พญาไท', 'Phaya Thai'],
+    ['N1', 'ราชเทวี', 'Ratchathewi'],
+    ['CEN', 'สยาม', 'Siam'],
+    ['E1', 'ชิดลม', 'Chit Lom'],
+    ['E2', 'เพลินจิต', 'Phloen Chit'],
+    ['E3', 'นานา', 'Nana'],
+    ['E4', 'อโศก', 'Asok'],
+    ['E5', 'พร้อมพงษ์', 'Phrom Phong'],
+    ['E6', 'ทองหล่อ', 'Thong Lo'],
+    ['E7', 'เอกมัย', 'Ekkamai'],
+    ['E8', 'พระโขนง', 'Phra Khanong'],
+    ['E9', 'อ่อนนุช', 'On Nut'],
+  ];
+  const SILOM = [
+    ['W1', 'สนามกีฬาแห่งชาติ', 'National Stadium'],
+    ['CEN', 'สยาม', 'Siam'],
+    ['S1', 'ราชดำริ', 'Ratchadamri'],
+    ['S2', 'ศาลาแดง', 'Sala Daeng'],
+    ['S3', 'ช่องนนทรี', 'Chong Nonsi'],
+    ['S4', 'เซนต์หลุยส์', 'Saint Louis'],
+    ['S5', 'สุรศักดิ์', 'Surasak'],
+    ['S6', 'สะพานตากสิน', 'Saphan Taksin'],
+    ['S7', 'กรุงธนบุรี', 'Krung Thon Buri'],
+    ['S8', 'วงเวียนใหญ่', 'Wongwian Yai'],
+  ];
+
+  // MRT สายสีน้ำเงิน 38 สถานี: วงกลม BL01-BL32 (ท่าพระ → ... → หัวลำโพง → ... → อิสรภาพ → ท่าพระ)
+  // และทางแยกจากท่าพระไปหลักสอง BL33-BL38
+  const BLUE_LOOP = [
+    ['BL01', 'ท่าพระ', 'Tha Phra'],
+    ['BL02', 'จรัญฯ 13', 'Charan 13'],
+    ['BL03', 'ไฟฉาย', 'Fai Chai'],
+    ['BL04', 'บางขุนนนท์', 'Bang Khun Non'],
+    ['BL05', 'บางยี่ขัน', 'Bang Yi Khan'],
+    ['BL06', 'สิรินธร', 'Sirindhorn'],
+    ['BL07', 'บางพลัด', 'Bang Phlat'],
+    ['BL08', 'บางอ้อ', 'Bang O'],
+    ['BL09', 'บางโพ', 'Bang Pho'],
+    ['BL10', 'เตาปูน', 'Tao Poon'],
+    ['BL11', 'บางซื่อ', 'Bang Sue'],
+    ['BL12', 'กำแพงเพชร', 'Kamphaeng Phet'],
+    ['BL13', 'สวนจตุจักร', 'Chatuchak Park'],
+    ['BL14', 'พหลโยธิน', 'Phahon Yothin'],
+    ['BL15', 'ลาดพร้าว', 'Lat Phrao'],
+    ['BL16', 'รัชดาภิเษก', 'Ratchadaphisek'],
+    ['BL17', 'สุทธิสาร', 'Sutthisan'],
+    ['BL18', 'ห้วยขวาง', 'Huai Khwang'],
+    ['BL19', 'ศูนย์วัฒนธรรมแห่งประเทศไทย', 'Thailand Cultural Centre'],
+    ['BL20', 'พระราม 9', 'Phra Ram 9'],
+    ['BL21', 'เพชรบุรี', 'Phetchaburi'],
+    ['BL22', 'สุขุมวิท', 'Sukhumvit'],
+    ['BL23', 'ศูนย์การประชุมแห่งชาติสิริกิติ์', 'Queen Sirikit National Convention Centre'],
+    ['BL24', 'คลองเตย', 'Khlong Toei'],
+    ['BL25', 'ลุมพินี', 'Lumphini'],
+    ['BL26', 'สีลม', 'Si Lom'],
+    ['BL27', 'สามย่าน', 'Sam Yan'],
+    ['BL28', 'หัวลำโพง', 'Hua Lamphong'],
+    ['BL29', 'วัดมังกร', 'Wat Mangkon'],
+    ['BL30', 'สามยอด', 'Sam Yot'],
+    ['BL31', 'สนามไชย', 'Sanam Chai'],
+    ['BL32', 'อิสรภาพ', 'Itsaraphap'],
+  ];
+  const BLUE_BRANCH = [
+    ['BL33', 'บางไผ่', 'Bang Phai'],
+    ['BL34', 'บางหว้า', 'Bang Wa'],
+    ['BL35', 'เพชรเกษม 48', 'Phetkasem 48'],
+    ['BL36', 'ภาษีเจริญ', 'Phasi Charoen'],
+    ['BL37', 'บางแค', 'Bang Khae'],
+    ['BL38', 'หลักสอง', 'Lak Song'],
+  ];
+
+  function toStation(row) {
+    return { id: row[0], th: row[1], en: row[2], ghost: !!row[3] };
+  }
+
+  function buildGraph(chains, extraEdges) {
+    const adj = {};
+    const add = (a, b) => {
+      (adj[a] = adj[a] || new Set()).add(b);
+      (adj[b] = adj[b] || new Set()).add(a);
+    };
+    chains.forEach((chain) => {
+      for (let i = 0; i < chain.length - 1; i++) add(chain[i][0], chain[i + 1][0]);
+    });
+    (extraEdges || []).forEach((e) => add(e[0], e[1]));
+    return adj;
+  }
+
+  // จำนวนสถานีที่เดินทาง = จำนวนช่วงบนเส้นทางที่สั้นที่สุด (BFS)
+  function hops(adj, from, to) {
+    if (from === to) return 0;
+    const dist = {};
+    dist[from] = 0;
+    const queue = [from];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const nxt of adj[cur] || []) {
+        if (dist[nxt] === undefined) {
+          dist[nxt] = dist[cur] + 1;
+          if (nxt === to) return dist[nxt];
+          queue.push(nxt);
+        }
+      }
+    }
+    return null;
+  }
+
+  const btsAdj = buildGraph([SUKHUMVIT, SILOM]);
+  // ปิดวง อิสรภาพ–ท่าพระ และต่อทางแยก ท่าพระ–บางไผ่
+  const blueAdj = buildGraph([BLUE_LOOP, BLUE_BRANCH], [
+    ['BL32', 'BL01'],
+    ['BL01', 'BL33'],
+  ]);
+
+  function btsStations() {
+    const seen = new Set();
+    const out = [];
+    SUKHUMVIT.concat(SILOM).forEach((r) => {
+      if (!seen.has(r[0]) && !r[3]) {
+        seen.add(r[0]);
+        out.push(toStation(r));
+      }
+    });
+    return out;
+  }
+
+  const SYSTEMS = {
+    bts: {
+      key: 'bts',
+      name: 'BTS สายสุขุมวิท/สีลม (ช่วงหลัก)',
+      stations: btsStations(),
+      adj: btsAdj,
+      fares: BTS_FARES,
+    },
+    mrt: {
+      key: 'mrt',
+      name: 'MRT สายสีน้ำเงิน',
+      stations: BLUE_LOOP.concat(BLUE_BRANCH).map(toStation),
+      adj: blueAdj,
+      fares: MRT_BLUE_FARES,
+    },
+  };
+
+  // ผู้สูงอายุ 60 ปีขึ้นไป ลด 50% ทั้งสองระบบ (ปัดเศษขึ้น)
+  function applyRider(full, rider) {
+    if (rider === 'elderly') return Math.ceil(full / 2);
+    if (rider === 'free') return 0;
+    return full;
+  }
+
+  /**
+   * คำนวณค่าโดยสารเที่ยวเดียว
+   * @param {'bts'|'mrt'} system
+   * @param {string} from รหัสสถานีต้นทาง
+   * @param {string} to รหัสสถานีปลายทาง
+   * @param {'adult'|'elderly'|'free'} rider
+   */
+  function calcFare(system, from, to, rider) {
+    const sys = SYSTEMS[system];
+    if (!sys || !from || !to || from === to) return null;
+    const n = hops(sys.adj, from, to);
+    if (!n) return null;
+    const full = sys.fares[Math.min(n, sys.fares.length) - 1];
+    return { stations: n, full: full, fare: applyRider(full, rider || 'adult') };
+  }
+
+  const api = {
+    SYSTEMS: SYSTEMS,
+    BTS_FARES: BTS_FARES,
+    BTS_FARES_VERIFIED: BTS_FARES_VERIFIED,
+    MRT_BLUE_FARES: MRT_BLUE_FARES,
+    calcFare: calcFare,
+    hops: hops,
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.TransitFares = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  var F = window.TransitFares;
+  var legsEl = document.getElementById('legs');
+  var legs = [{ sys: 'bts', from: '', to: '' }];
+
+  function stationOptions(sys, selected) {
+    var opts = '<option value="">เลือกสถานี</option>';
+    F.SYSTEMS[sys].stations.forEach(function (s) {
+      opts += '<option value="' + s.id + '"' + (s.id === selected ? ' selected' : '') + '>' +
+        s.id + ' · ' + s.th + '</option>';
+    });
+    return opts;
+  }
+
+  function render() {
+    legsEl.innerHTML = '';
+    legs.forEach(function (leg, i) {
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="leg-head"><span class="leg-title">ช่วงที่ ' + (i + 1) + '</span>' +
+        '<span><span class="seg">' +
+        '<button type="button" data-sys="bts" aria-pressed="' + (leg.sys === 'bts') + '">BTS</button>' +
+        '<button type="button" data-sys="mrt" aria-pressed="' + (leg.sys === 'mrt') + '">MRT</button>' +
+        '</span>' + (legs.length > 1 ? ' <button type="button" class="remove" aria-label="ลบช่วงนี้">ลบ</button>' : '') +
+        '</span></div>' +
+        '<div class="grid">' +
+        '<div><label>ต้นทาง</label><select data-k="from">' + stationOptions(leg.sys, leg.from) + '</select></div>' +
+        '<div><label>ปลายทาง</label><select data-k="to">' + stationOptions(leg.sys, leg.to) + '</select></div>' +
+        '</div><div class="leg-result" data-result></div>';
+
+      card.querySelectorAll('.seg button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          if (leg.sys !== b.dataset.sys) { leg.sys = b.dataset.sys; leg.from = ''; leg.to = ''; render(); }
+        });
+      });
+      card.querySelectorAll('select').forEach(function (s) {
+        s.addEventListener('change', function () { leg[s.dataset.k] = s.value; update(); });
+      });
+      var rm = card.querySelector('.remove');
+      if (rm) rm.addEventListener('click', function () { legs.splice(i, 1); render(); });
+      legsEl.appendChild(card);
+    });
+    update();
+  }
+
+  function update() {
+    var rider = document.getElementById('rider').value;
+    var total = 0;
+    var results = legsEl.querySelectorAll('[data-result]');
+    legs.forEach(function (leg, i) {
+      var el = results[i];
+      var r = F.calcFare(leg.sys, leg.from, leg.to, rider);
+      if (r) {
+        total += r.fare;
+        el.innerHTML = 'เดินทาง ' + r.stations + ' สถานี · <b>' + r.fare + ' บาท</b>' +
+          (r.fare !== r.full ? ' (ราคาปกติ ' + r.full + ' บาท)' : '');
+      } else if (leg.from && leg.from === leg.to) {
+        el.textContent = 'ต้นทางและปลายทางเป็นสถานีเดียวกัน';
+      } else {
+        el.textContent = 'เลือกต้นทางและปลายทางเพื่อดูราคา';
+      }
+    });
+    var trips = Math.max(1, +document.getElementById('trips').value || 1);
+    var days = Math.max(1, +document.getElementById('days').value || 1);
+    document.getElementById('total').textContent = total + ' บาท';
+    document.getElementById('monthly').textContent =
+      'ประมาณต่อเดือน: ' + (total * trips * days).toLocaleString('th-TH') + ' บาท';
+    document.getElementById('bts-warning').hidden =
+      F.BTS_FARES_VERIFIED || !legs.some(function (l) { return l.sys === 'bts'; });
+  }
+
+  document.getElementById('add-leg').addEventListener('click', function () {
+    var last = legs[legs.length - 1];
+    legs.push({ sys: last && last.sys === 'bts' ? 'mrt' : 'bts', from: '', to: '' });
+    render();
+  });
+  ['rider', 'trips', 'days'].forEach(function (id) {
+    document.getElementById(id).addEventListener('input', update);
+  });
+  render();
+})();
+</script>
+</body>
+</html>
